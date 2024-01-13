@@ -1,6 +1,9 @@
+import http from 'http';
 import express from 'express';
+import WebSocket, { WebSocketServer } from 'ws';
 import cors from 'cors';
 import bodyParser from 'body-parser';
+// import * as crypto from 'crypto';
 
 const app = express();
 
@@ -180,35 +183,23 @@ const notes = [
     id: 1,
   },
 ];
-
-let nextId = 23;
-const limit = 7;
+let id = 23;
 
 app.get('/notes', (req, res) => {
-  const { startingIndex } = req.query;
-  if (!notes.length || !notes[startingIndex]) {
+  const { loadedQuantity } = req.query;
+  if (!notes.length || Number(loadedQuantity) === notes.length) {
     res.status(400);
     res.end();
-    return;
   }
-  const from = Number(startingIndex);
-  let to = from + limit;
-  if (to > notes.length) {
-    to = notes.length;
+  const lastOnsend = notes.length - Number(loadedQuantity);
+  let firstOnsend = lastOnsend - 10;
+  if (lastOnsend === firstOnsend) {
+    res.status(400);
+    res.end();
   }
-  const onSendNotes = notes.slice(from, to);
+  if (firstOnsend < 0) firstOnsend = 0;
+  const onSendNotes = notes.slice(firstOnsend, lastOnsend);
   res.send(JSON.stringify(onSendNotes));
-});
-
-app.get('/note', (req, res) => {
-  const onSendNote = notes.slice(0, 1);
-  res.send(JSON.stringify(...onSendNote));
-});
-
-app.post('/notes', (req, res) => {
-  notes.unshift({ ...req.body, id: nextId += 1 });
-  res.status(204);
-  res.end();
 });
 
 app.delete('/notes/:id', (req, res) => {
@@ -221,5 +212,30 @@ app.delete('/notes/:id', (req, res) => {
   res.end();
 });
 
+const server = http.createServer(app);
+const wsServer = new WebSocketServer({ server });
+wsServer.on('connection', (ws) => {
+  ws.on('message', (message) => {
+    const parsed = JSON.parse(message);
+    parsed.id = id;
+    id += 1;
+    notes.push(parsed);
+    Array.from(wsServer.clients)
+      .filter((client) => client.readyState === WebSocket.OPEN)
+      .forEach((client) => client.send(JSON.stringify(parsed)));
+  });
+});
+
 const port = process.env.PORT || 7070;
-app.listen(port, () => console.log(`The server is running on http://localhost:${port}`));
+
+const bootstrap = async () => {
+  try {
+    server.listen(port, () => {
+      console.log(`Server has been started on http://localhost:${port}`);
+    });
+  } catch (error) {
+    console.error(error);
+  }
+};
+
+bootstrap();
